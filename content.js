@@ -68,6 +68,10 @@
           text-align: left;
         }
         .body { white-space: pre-wrap; word-break: break-word; }
+        .math { white-space: normal; }
+        .math math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", math; font-size: 1.05em; }
+        .math.display { display: block; margin: 4px 0; padding: 2px 0; text-align: center; overflow-x: auto; overflow-y: hidden; }
+        .math.display math { display: block math; }
         .close {
           position: absolute; top: 4px; right: 6px;
           border: 0; background: none; cursor: pointer;
@@ -259,11 +263,74 @@
     box.style.top = `${best.top + window.scrollY}px`;
   }
 
+  // ---------- LaTeX 公式渲染 ----------
+  // 译文里的公式用 $...$（行内）和 $$...$$（单独一行）包起来，用 KaTeX 转成浏览器原生的 MathML 显示。
+  // KaTeX 体积较大，只在第一次遇到公式时才加载。
+  let katexLib = null;
+  let katexLoading = null;
+  let popupVersion = 0;
+
+  function loadKatex() {
+    katexLoading ??= import(chrome.runtime.getURL("lib/katex.mjs"))
+      .then((m) => (katexLib = m.default || m))
+      .catch(() => null);
+    return katexLoading;
+  }
+
+  const ESCAPED_DOLLAR = ""; // 临时替换 \$（普通美元符号），免得被当成公式边界
+  const MATH_RE = /\$\$([\s\S]+?)\$\$|\$(?!\s)([^$\n]+?)(?<!\s)\$/g;
+
+  function hasMath(text) {
+    MATH_RE.lastIndex = 0;
+    return MATH_RE.test(String(text).replace(/\\\$/g, ESCAPED_DOLLAR));
+  }
+
+  function fillWithMath(el, text) {
+    const t = String(text).replace(/\\\$/g, ESCAPED_DOLLAR);
+    const plain = (s) => s.split(ESCAPED_DOLLAR).join("$");
+    if (!katexLib) {
+      el.append(plain(t));
+      return;
+    }
+    MATH_RE.lastIndex = 0;
+    let last = 0;
+    let m;
+    while ((m = MATH_RE.exec(t))) {
+      const display = m[1] != null;
+      let before = t.slice(last, m.index);
+      // 单独一行的公式本身就占一整行，去掉它前后的换行，免得多出空行
+      if (display) before = before.replace(/[ \t]*\n[ \t]*$/, "");
+      if (last > 0 && t[last - 1] === "$" && t[last - 2] === "$") before = before.replace(/^[ \t]*\n/, "");
+      el.append(plain(before));
+      const tex = (display ? m[1] : m[2]).split(ESCAPED_DOLLAR).join("\\$");
+      const span = document.createElement("span");
+      span.className = display ? "math display" : "math";
+      try {
+        span.innerHTML = katexLib.renderToString(tex, { output: "mathml", throwOnError: false, displayMode: display });
+      } catch (_) {
+        span.textContent = m[0]; // 渲染失败就原样显示
+      }
+      el.append(span);
+      last = MATH_RE.lastIndex;
+    }
+    let tail = t.slice(last);
+    if (last > 1 && t[last - 1] === "$" && t[last - 2] === "$") tail = tail.replace(/^[ \t]*\n/, "");
+    el.append(plain(tail));
+  }
+
   function showPopup(range, content, cls, { synonyms = [], note = "", actions = [] } = {}) {
     ensurePopup();
     host.style.display = "block";
     bodyEl.className = `body ${cls || ""}`;
-    bodyEl.textContent = content;
+    bodyEl.textContent = "";
+    fillWithMath(bodyEl, content);
+    const version = ++popupVersion;
+    if (!katexLib && hasMath(content)) {
+      // 第一次遇到公式：先按纯文字显示，加载完公式渲染器后再重画一次
+      loadKatex().then(() => {
+        if (katexLib && version === popupVersion) showPopup(range, content, cls, { synonyms, note, actions });
+      });
+    }
     if (synonyms.length) {
       // 单词的英文近义词，显示在译文下面一行
       const syn = document.createElement("div");
@@ -458,19 +525,6 @@
     ];
   }
 
-  // 已经填了 Claude 的 API Key：译文本身就来自 Claude，底部只留 ChatGPT 按钮；
-  // 设置里关掉「显示用 ChatGPT 翻译」后，连这个按钮也不显示
-  let showGpt = true;
-  chrome.storage.sync.get({ showGpt: true }, (v) => (showGpt = v.showGpt));
-  chrome.storage.onChanged.addListener((c) => {
-    if (c.showGpt) showGpt = c.showGpt.newValue;
-  });
-
-  function gptOnly(text, word) {
-    if (!showGpt) return [];
-    return aiActions(text, word).filter((a) => a.id === "chatgpt");
-  }
-
   // ---------- 长文总结 ----------
   const SUMMARY_MIN_WORDS = 400;
 
@@ -501,10 +555,10 @@
 
   // 显示 Claude 的译文；长文在底部多一个「总结」按钮，按一下换成总结，再按一下换回译文
   function showTranslationView(range, text, word, t, seq) {
+    // 填了 Claude 的 API Key：译文全部由 Claude 提供，不再显示 Claude / ChatGPT 网页按钮
     const synonyms = word && Array.isArray(t.synonyms) ? t.synonyms.filter(Boolean).slice(0, 3) : [];
-    const gpt = gptOnly(text, word);
     if (countWords(text) < SUMMARY_MIN_WORDS) {
-      showPopup(range, t.text, "", { synonyms, actions: gpt });
+      showPopup(range, t.text, "", { synonyms });
       return;
     }
 
@@ -513,7 +567,7 @@
     const showTranslation = () => {
       view = "translation";
       showPopup(range, t.text, "", {
-        actions: [{ label: "总结", primary: true, onClick: showSummary }, ...gpt]
+        actions: [{ label: "总结", primary: true, onClick: showSummary }]
       });
     };
     const showSummary = async () => {
@@ -535,7 +589,7 @@
       }
       showPopup(range, summary, "", {
         note: "全文总结",
-        actions: [{ label: "显示译文", primary: true, onClick: showTranslation }, ...gpt]
+        actions: [{ label: "显示译文", primary: true, onClick: showTranslation }]
       });
     };
     showTranslation();
@@ -559,8 +613,7 @@
       showPopup(range, res.error, "error");
       return;
     }
-    // 填了 Key 但这次 Claude 调用失败（网络、额度等）：仍可一键改用 ChatGPT
-    showPopup(range, `翻译失败：${res?.error || "没有返回结果"}`, "error", { actions: gptOnly(text, word) });
+    showPopup(range, `翻译失败：${res?.error || "没有返回结果"}`, "error");
   }
 
   async function translateWithoutKey(text, range, word, seq) {

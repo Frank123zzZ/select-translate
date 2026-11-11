@@ -8,16 +8,17 @@ const NO_KEY_HINT = "未填 Key：使用 Chrome 内置免费翻译";
 function showKeyHint(key) {
   statusEl.textContent = key ? "" : NO_KEY_HINT;
   statusEl.style.color = key ? "" : "#999";
-  // 「用 ChatGPT 翻译」开关只对填了 Key 的用户有意义；没填 Key 时两个按钮总是显示
-  gptRowEl.classList.toggle("show", Boolean(key));
 }
 
-// ---------- 「用 ChatGPT 翻译」按钮开关 ----------
-const gptRowEl = document.getElementById("gptRow");
-const showGptEl = document.getElementById("showGpt");
-chrome.storage.sync.get({ showGpt: true }, (v) => (showGptEl.checked = v.showGpt));
-showGptEl.addEventListener("change", () => {
-  chrome.storage.sync.set({ showGpt: showGptEl.checked });
+// ---------- 截图翻译按钮（和快捷键效果一样） ----------
+document.getElementById("snip").addEventListener("click", () => {
+  chrome.runtime.sendMessage({ type: "startSnip" });
+  window.close();
+});
+// 显示当前设置的快捷键（用户可以在 chrome://extensions/shortcuts 里改）
+chrome.commands.getAll((cmds) => {
+  const c = cmds.find((x) => x.name === "snip-translate");
+  document.getElementById("snipKey").textContent = c?.shortcut ? `（${c.shortcut}）` : "";
 });
 
 function showState(on) {
@@ -64,7 +65,6 @@ document.getElementById("save").addEventListener("click", () => {
     if (key) {
       statusEl.textContent = "Key 已保存 ✓";
       statusEl.style.color = "";
-      gptRowEl.classList.add("show");
     } else {
       showKeyHint("");
     }

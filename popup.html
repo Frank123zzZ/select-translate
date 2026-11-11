@@ -28,19 +28,13 @@
     .seg button small { display: block; font-size: 11px; font-weight: 400; color: #999; }
     .seg button:focus-visible { outline: 2px solid #d97757; outline-offset: -2px; }
 
-    /* 小开关行（「显示用 ChatGPT 翻译」） */
-    .site { display: none; align-items: center; justify-content: space-between; gap: 10px; margin: -4px 0 14px; padding: 8px 10px; border-radius: 8px; background: #f6f6f6; }
-    .site.show { display: flex; }
-    .site-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #555; }
-    .site-text b { color: #222; font-weight: 600; }
-    .site .track { width: 34px; height: 20px; }
-    .site .track::after { width: 14px; height: 14px; }
-    .site .switch input:checked + .track::after { transform: translateX(14px); }
-
     label.field { display: block; margin: 0 0 4px; }
     input[type=password] { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 6px; }
     button { margin-top: 10px; width: 100%; padding: 7px; border: 0; border-radius: 6px; background: #d97757; color: #fff; cursor: pointer; }
     #status { color: #2a8; font-size: 12px; min-height: 18px; margin-top: 4px; }
+    button.snip { margin: -2px 0 14px; background: #f6f6f6; color: #333; }
+    button.snip:hover { background: #eee; }
+    #snipKey { color: #999; font-size: 12px; }
   </style>
 </head>
 <body>
@@ -60,13 +54,7 @@
       <button type="button" data-mode="opus" role="radio">Opus 5.5<small>文学 · 细腻</small></button>
     </div>
   </div>
-  <div class="site" id="gptRow">
-    <span class="site-text">显示「<b>用 ChatGPT 翻译</b>」</span>
-    <label class="switch" title="在翻译弹窗底部显示或隐藏「用 ChatGPT 翻译」按钮">
-      <input id="showGpt" type="checkbox" />
-      <span class="track"></span>
-    </label>
-  </div>
+  <button id="snip" class="snip">截图翻译 <span id="snipKey"></span></button>
   <label class="field" for="key">Anthropic API Key</label>
   <input id="key" type="password" placeholder="sk-ant-..." />
   <button id="save">保存 Key</button>

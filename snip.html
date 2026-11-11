@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>截图翻译</title>
+  <style>
+    :root { --accent: #d97757; --panel-bg: #fff; --panel-fg: #1f1f1f; --muted: #888; --line: rgba(0, 0, 0, 0.08); }
+    @media (prefers-color-scheme: dark) {
+      :root { --panel-bg: #2b2b2b; --panel-fg: #eee; --muted: #aaa; --line: rgba(255, 255, 255, 0.12); }
+    }
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #111; cursor: crosshair; user-select: none; }
+    #stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
+    #shot { display: block; max-width: none; }
+    /* 未框选时整张图变暗；框选后只有框外变暗 */
+    #dim { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.35); pointer-events: none; }
+    #box { position: fixed; display: none; border: 2px solid var(--accent); box-shadow: 0 0 0 99999px rgba(0, 0, 0, 0.35); pointer-events: none; }
+    #hint {
+      position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+      padding: 6px 14px; border-radius: 16px; background: rgba(0, 0, 0, 0.7); color: #fff;
+      font: 13px/1.5 -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif; pointer-events: none;
+    }
+    #panel {
+      position: fixed; display: none; box-sizing: border-box; width: 420px; max-width: calc(100vw - 24px); max-height: 60vh; overflow: auto;
+      padding: 12px 14px; border-radius: 10px; background: var(--panel-bg); color: var(--panel-fg);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35); cursor: auto; user-select: text;
+      font: 14px/1.6 -apple-system, "Microsoft YaHei", "PingFang SC", sans-serif;
+    }
+    #panel .text { white-space: pre-wrap; word-break: break-word; }
+    #panel .loading { color: var(--muted); }
+    #panel .error { color: #c0392b; }
+    #panel details { margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; }
+    #panel summary { cursor: pointer; }
+    #panel .actions { display: flex; gap: 12px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--line); font-size: 12px; }
+    #panel .actions button { border: 0; padding: 0; background: none; color: var(--accent); cursor: pointer; font: inherit; }
+    #panel .actions button:hover { text-decoration: underline; }
+    .math { white-space: normal; }
+    .math math { font-family: "Cambria Math", "STIX Two Math", "Latin Modern Math", math; font-size: 1.05em; }
+    .math.display { display: block; margin: 4px 0; padding: 2px 0; text-align: center; overflow-x: auto; overflow-y: hidden; }
+    .math.display math { display: block math; }
+  </style>
+</head>
+<body>
+  <div id="stage"><img id="shot" alt="" draggable="false" /></div>
+  <div id="dim"></div>
+  <div id="box"></div>
+  <div id="hint">拖动鼠标框选要翻译的区域 · Esc 退出</div>
+  <div id="panel" role="dialog" aria-label="翻译结果">
+    <div class="text" id="result"></div>
+    <details id="origWrap"><summary>原文</summary><div class="text" id="orig"></div></details>
+    <div class="actions">
+      <button type="button" id="again">重新框选</button>
+      <button type="button" id="close">关闭</button>
+    </div>
+  </div>
+  <script type="module" src="snip.js"></script>
+</body>
+</html>

@@ -20,6 +20,8 @@
   近义词 extraordinary · striking · notable
   ```
 
+- **截图翻译（Chrome 自带的 PDF 阅读器也能用）**：Chrome 不允许插件读取它自带的 PDF 阅读器（例如直接打开的 `arxiv.org/pdf/...`），划词翻译在那里不起作用。这时按快捷键 **Alt+T**（或点插件图标里的「截图翻译」），插件会截下当前页面，在同样大小的窗口里显示；拖动鼠标框选要翻译的区域，Claude 会识别图中文字（公式识别成 LaTeX）并翻译，结果显示在选框旁边，原文可展开查看。Esc 退出。快捷键可在 `chrome://extensions/shortcuts` 修改；Chrome 只允许键盘组合作为快捷键，不能设成鼠标双击。需要填 API Key
+- **数学公式正常显示**：读学术文章时，选中的内容里有公式也没关系。模型会把公式（包括从 PDF 复制出来变形、乱码的公式）还原成 LaTeX，弹窗再用 [KaTeX](https://katex.org)（MIT 许可，在 `lib/` 里）渲染成正常的数学公式；行内公式跟着文字走，单独一行的公式居中显示。只在遇到公式时才加载 KaTeX
 - **长文一键总结**：一次划选超过约 400 词（中文按约 600 字）时，弹窗底部多一个「总结」按钮。按一下把译文换成全文总结（一两句主旨 + 3–6 个要点），再按「显示译文」换回来。总结只请求一次，来回切换不再花钱。需要填 API Key；最多可划选约 15000 字符
 - 弹窗自动放在选区附近的空白处；附近全是文字时放在选区上方，不挡住下文
 - 支持网页里嵌入的 PDF 阅读器（如 Brightspace）和网页组件（Shadow DOM）
@@ -39,9 +41,7 @@ API Key 在 [platform.claude.com](https://platform.claude.com) 创建，按用�
 ### 没有 API Key 也能用
 
 - **Chrome 内置翻译**：不填 Key 时，自动改用 Chrome 自带的 AI 翻译（Translator API），免费、在本机运行。需要较新版本的 Chrome（138 及以上），第一次使用某个语言时会先下载翻译模型。没有近义词和 Opus 文学模式，质量也不如 Claude。
-- **用 Claude / ChatGPT 翻译**：弹窗底部有按钮，点一下会打开 claude.ai 或 chatgpt.com，翻译要求和选中的文字已经填好，用的是你自己的 Claude 或 ChatGPT 账号。
-  - 没填 Key：显示「用 Claude 翻译」和「用 ChatGPT 翻译」两个按钮
-  - 填了 Claude 的 Key：译文已经来自 Claude，只显示「用 ChatGPT 翻译」，方便对比或在 ChatGPT 里追问；不需要的话，可在设置窗口里关掉「显示『用 ChatGPT 翻译』」
+- **用 Claude / ChatGPT 翻译**：没填 Key 时，弹窗底部有「用 Claude 翻译」和「用 ChatGPT 翻译」两个按钮，点一下会打开 claude.ai 或 chatgpt.com，翻译要求和选中的文字已经填好，用的是你自己的 Claude 或 ChatGPT 账号。填了 Claude 的 API Key 后，翻译全部由 Claude 完成，不再显示这两个按钮
 
 ## 文件
 
@@ -49,5 +49,7 @@ API Key 在 [platform.claude.com](https://platform.claude.com) 创建，按用�
 - `content.js` / `content.css`：划词、弹窗定位
 - `background.js`：调用 Claude API
 - `popup.html` / `popup.js`：设置窗口
+- `snip.html` / `snip.js`：截图翻译页面
 - `sites.js`：默认不翻译的网站
 - `icons/`：图标
+- `lib/katex.mjs`：KaTeX 0.16.47，用来显示公式（许可证见 `lib/KATEX-LICENSE`）
