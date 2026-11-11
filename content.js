@@ -79,11 +79,22 @@
         .error { color: #c0392b; }
         .syn { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(0, 0, 0, 0.08); font-size: 13px; color: #555; }
         .syn-label { margin-right: 6px; font-size: 12px; color: #d97757; }
+        .foot {
+          display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px;
+          margin-top: 6px; padding-top: 5px; border-top: 1px solid rgba(0, 0, 0, 0.08);
+          font-size: 12px; color: #999; white-space: normal;
+        }
+        .foot button {
+          border: 0; padding: 0; background: none; cursor: pointer;
+          font: inherit; color: #d97757;
+        }
+        .foot button:hover { text-decoration: underline; }
         @media (prefers-color-scheme: dark) {
           .box { background: #2b2b2b; color: #eee; border-color: rgba(255,255,255,0.12); }
           .close:hover { color: #fff; }
           .error { color: #ff8a80; }
           .syn { color: #bbb; border-top-color: rgba(255, 255, 255, 0.12); }
+          .foot { border-top-color: rgba(255, 255, 255, 0.12); }
         }
       </style>
       <div class="box" role="dialog" aria-label="翻译">
@@ -241,7 +252,7 @@
     box.style.top = `${best.top + window.scrollY}px`;
   }
 
-  function showPopup(range, content, cls, synonyms = []) {
+  function showPopup(range, content, cls, { synonyms = [], note = "", actions = [] } = {}) {
     ensurePopup();
     host.style.display = "block";
     bodyEl.className = `body ${cls || ""}`;
@@ -255,6 +266,23 @@
       label.textContent = "近义词";
       syn.append(label, synonyms.join(" · "));
       bodyEl.append(syn);
+    }
+    if (note || actions.length) {
+      // 底部一行：说明文字 + 「用 Claude 翻译」「用 ChatGPT 翻译」按钮
+      const foot = document.createElement("div");
+      foot.className = "foot";
+      if (note) foot.append(note);
+      for (const a of actions) {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = a.label;
+        btn.addEventListener("click", () => {
+          window.open(a.url, "_blank", "noopener");
+          hidePopup();
+        });
+        foot.append(btn);
+      }
+      bodyEl.append(foot);
     }
     box.scrollTop = 0;
     placePopup(range);
@@ -317,6 +345,113 @@
     });
   }
 
+  // ---------- 没有 API Key 时：Chrome 内置翻译（免费、在本机运行） ----------
+  // 区分简体 / 繁体：数一数各自专用的常见字
+  const TRAD_CHARS = "這們國說時來會學對為過還經無從發開問題實現點應種樣兩個機動長頭見關與當體將進產業務電話車東門書頁網際資訊軟體雖讓認識聽讀寫環選擇區處難戰爭歷總統準備須麼們嗎裡號氣錢買賣邊幾雙聲員層樂愛";
+  const SIMP_CHARS = "这们国说时来会学对为过还经无从发开问题实现点应种样两个机动长头见关与当体将进产业务电话车东门书页网际资讯软体虽让认识听读写环选择区处难战争历总统准备须么们吗里号气钱买卖边几双声员层乐爱";
+  const TRAD_SET = new Set([...TRAD_CHARS].filter((c) => !SIMP_CHARS.includes(c)));
+  const SIMP_SET = new Set([...SIMP_CHARS].filter((c) => !TRAD_CHARS.includes(c)));
+
+  function chineseVariant(text) {
+    let han = 0, letters = 0, trad = 0, simp = 0;
+    for (const ch of text) {
+      if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(ch)) return null; // 日文
+      if (/\p{L}/u.test(ch)) letters++;
+      if (/\p{Script=Han}/u.test(ch)) han++;
+      if (TRAD_SET.has(ch)) trad++;
+      if (SIMP_SET.has(ch)) simp++;
+    }
+    if (!letters || han / letters <= 0.5) return null;
+    return trad > simp ? "zh-Hant" : "zh";
+  }
+
+  // 内置 AI 在某些浏览器里存在但永远不回应，给它设个时限，免得弹窗一直停在「翻译中…」
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, reject) =>
+        setTimeout(() => {
+          const e = new Error("timeout");
+          e.code = "UNSUPPORTED";
+          reject(e);
+        }, ms)
+      )
+    ]);
+  }
+
+  let detector = null;
+  async function detectLanguage(text) {
+    const zh = chineseVariant(text);
+    if (zh) return zh;
+    if (typeof LanguageDetector !== "undefined") {
+      try {
+        detector ??= await withTimeout(LanguageDetector.create(), 4000);
+        const [top] = await withTimeout(detector.detect(text), 4000);
+        if (top && top.detectedLanguage && top.detectedLanguage !== "und" && top.confidence > 0.4) {
+          return top.detectedLanguage.split("-")[0];
+        }
+      } catch (_) {}
+    }
+    // 识别不了时按文字系统猜
+    if (/\p{Script=Hangul}/u.test(text)) return "ko";
+    if (/\p{Script=Cyrillic}/u.test(text)) return "ru";
+    if (/\p{Script=Arabic}/u.test(text)) return "ar";
+    if (/\p{Script=Thai}/u.test(text)) return "th";
+    return "en";
+  }
+
+  const translators = new Map();
+  async function builtinTranslate(text, onProgress) {
+    if (typeof Translator === "undefined") {
+      const e = new Error("unsupported");
+      e.code = "UNSUPPORTED";
+      throw e;
+    }
+    const source = await detectLanguage(text);
+    const target = source === "zh" ? "en" : "zh"; // 简体 → 英文；繁体和其他语言 → 简体中文
+    const key = `${source}>${target}`;
+    let tr = translators.get(key);
+    if (!tr) {
+      const avail = await withTimeout(
+        Translator.availability({ sourceLanguage: source, targetLanguage: target }),
+        6000
+      );
+      if (avail === "unavailable") {
+        const e = new Error(`Chrome 内置翻译不支持 ${source} → ${target}`);
+        e.code = "PAIR_UNAVAILABLE";
+        throw e;
+      }
+      tr = await Translator.create({
+        sourceLanguage: source,
+        targetLanguage: target,
+        monitor(m) {
+          m.addEventListener("downloadprogress", (ev) => onProgress?.(ev.loaded));
+        }
+      });
+      translators.set(key, tr);
+    }
+    return tr.translate(text);
+  }
+
+  // ---------- 「用 Claude / ChatGPT 翻译」：打开用户自己的账号，提示词已填好 ----------
+  function aiActions(text, word) {
+    const body = text.length > 1500 ? text.slice(0, 1500) + "…" : text;
+    const prompt =
+      "请翻译下面的文字。规则：简体中文译成英文；繁体中文转成简体中文（用大陆习惯用语）；其他语言译成简体中文。" +
+      (word ? "这是一个单词，请给出译文，并附上 2 到 3 个英文近义词。" : "只给出译文。") +
+      "\n\n" + body;
+    const q = encodeURIComponent(prompt);
+    return [
+      { id: "claude", label: "用 Claude 翻译", url: `https://claude.ai/new?q=${q}` },
+      { id: "chatgpt", label: "用 ChatGPT 翻译", url: `https://chatgpt.com/?q=${q}` }
+    ];
+  }
+
+  // 已经填了 Claude 的 API Key：译文本身就来自 Claude，底部只留 ChatGPT 按钮
+  function gptOnly(text, word) {
+    return aiActions(text, word).filter((a) => a.id === "chatgpt");
+  }
+
   async function translateSelection(text, range) {
     const seq = ++requestSeq;
     showPopup(range, "翻译中…", "loading");
@@ -326,10 +461,38 @@
     if (res?.ok && res.translations?.length) {
       const t = res.translations[0];
       const synonyms = word && Array.isArray(t.synonyms) ? t.synonyms.filter(Boolean).slice(0, 3) : [];
-      showPopup(range, t.text, "", synonyms);
-    } else {
-      const msg = res?.stale ? res.error : `翻译失败：${res?.error || "没有返回结果"}`;
-      showPopup(range, msg, "error");
+      showPopup(range, t.text, "", { synonyms, actions: gptOnly(text, word) });
+      return;
+    }
+    if (res?.code === "NO_KEY") {
+      await translateWithoutKey(text, range, word, seq);
+      return;
+    }
+    if (res?.stale) {
+      showPopup(range, res.error, "error");
+      return;
+    }
+    // 填了 Key 但这次 Claude 调用失败（网络、额度等）：仍可一键改用 ChatGPT
+    showPopup(range, `翻译失败：${res?.error || "没有返回结果"}`, "error", { actions: gptOnly(text, word) });
+  }
+
+  async function translateWithoutKey(text, range, word, seq) {
+    const actions = aiActions(text, word);
+    try {
+      const out = await builtinTranslate(text, (loaded) => {
+        if (seq === requestSeq) showPopup(range, `正在下载翻译模型… ${Math.round(loaded * 100)}%`, "loading");
+      });
+      if (seq !== requestSeq) return;
+      showPopup(range, out, "", { note: "Chrome 内置翻译", actions });
+    } catch (e) {
+      if (seq !== requestSeq) return;
+      const why =
+        e?.code === "UNSUPPORTED"
+          ? "没有填写 API Key，这个页面也用不了 Chrome 内置翻译。"
+          : e?.code === "PAIR_UNAVAILABLE"
+            ? `没有填写 API Key，${e.message}。`
+            : `没有填写 API Key，Chrome 内置翻译出错：${e?.message || e}`;
+      showPopup(range, why, "error", { note: "可以改用：", actions });
     }
   }
 

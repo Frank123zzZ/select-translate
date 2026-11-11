@@ -3,6 +3,13 @@ const enabledEl = document.getElementById("enabled");
 const stateTextEl = document.getElementById("stateText");
 const statusEl = document.getElementById("status");
 
+// 没填 Key 时提示正在用的是免费的 Chrome 内置翻译
+const NO_KEY_HINT = "未填 Key：使用 Chrome 内置免费翻译";
+function showKeyHint(key) {
+  statusEl.textContent = key ? "" : NO_KEY_HINT;
+  statusEl.style.color = key ? "" : "#999";
+}
+
 function showState(on) {
   enabledEl.checked = on;
   stateTextEl.textContent = on ? "已开启" : "已关闭";
@@ -22,6 +29,7 @@ function showMode(mode) {
 
 chrome.storage.sync.get({ apiKey: "", enabled: true, mode: "sonnet" }, (v) => {
   keyEl.value = v.apiKey;
+  showKeyHint(v.apiKey);
   showState(v.enabled);
   showMode(v.mode);
 });
@@ -78,7 +86,13 @@ siteOnEl.addEventListener("change", () => {
 });
 
 document.getElementById("save").addEventListener("click", () => {
-  chrome.storage.sync.set({ apiKey: keyEl.value.trim() }, () => {
-    statusEl.textContent = "Key 已保存 ✓";
+  const key = keyEl.value.trim();
+  chrome.storage.sync.set({ apiKey: key }, () => {
+    if (key) {
+      statusEl.textContent = "Key 已保存 ✓";
+      statusEl.style.color = "";
+    } else {
+      showKeyHint("");
+    }
   });
 });

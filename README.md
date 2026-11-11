@@ -33,6 +33,13 @@
 
 API Key 在 [platform.claude.com](https://platform.claude.com) 创建，按用量计费。Key 只保存在你自己的浏览器里，不在本仓库中。
 
+### 没有 API Key 也能用
+
+- **Chrome 内置翻译**：不填 Key 时，自动改用 Chrome 自带的 AI 翻译（Translator API），免费、在本机运行。需要较新版本的 Chrome（138 及以上），第一次使用某个语言时会先下载翻译模型。没有近义词和 Opus 文学模式，质量也不如 Claude。
+- **用 Claude / ChatGPT 翻译**：弹窗底部有按钮，点一下会打开 claude.ai 或 chatgpt.com，翻译要求和选中的文字已经填好，用的是你自己的 Claude 或 ChatGPT 账号。
+  - 没填 Key：显示「用 Claude 翻译」和「用 ChatGPT 翻译」两个按钮
+  - 填了 Claude 的 Key：译文已经来自 Claude，只显示「用 ChatGPT 翻译」，方便对比或在 ChatGPT 里追问
+
 ## 文件
 
 - `manifest.json`：插件配置

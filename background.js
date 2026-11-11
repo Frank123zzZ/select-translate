@@ -55,7 +55,12 @@ const OUTPUT_SCHEMA = {
 
 async function translateBatch(items, languageHint) {
   const { apiKey, mode } = await chrome.storage.sync.get({ apiKey: "", mode: "sonnet" });
-  if (!apiKey) throw new Error("还没有设置 API Key，请点击扩展图标填写。");
+  if (!apiKey) {
+    // 没有 Key 时由网页里的脚本改用 Chrome 内置翻译
+    const err = new Error("还没有设置 API Key");
+    err.code = "NO_KEY";
+    throw err;
+  }
   const cfg = MODES[mode] || MODES.sonnet;
 
   const res = await fetch(API_URL, {
@@ -111,7 +116,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg?.type !== "translate") return;
   translateBatch(msg.items, msg.languageHint)
     .then((translations) => sendResponse({ ok: true, translations }))
-    .catch((e) => sendResponse({ ok: false, error: String(e.message || e) }));
+    .catch((e) => sendResponse({ ok: false, code: e.code, error: String(e.message || e) }));
   return true; // 异步响应
 });
 
