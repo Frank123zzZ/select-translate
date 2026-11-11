@@ -77,10 +77,13 @@
         .close:hover { color: #333; }
         .loading { color: #888; }
         .error { color: #c0392b; }
+        .syn { margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(0, 0, 0, 0.08); font-size: 13px; color: #555; }
+        .syn-label { margin-right: 6px; font-size: 12px; color: #d97757; }
         @media (prefers-color-scheme: dark) {
           .box { background: #2b2b2b; color: #eee; border-color: rgba(255,255,255,0.12); }
           .close:hover { color: #fff; }
           .error { color: #ff8a80; }
+          .syn { color: #bbb; border-top-color: rgba(255, 255, 255, 0.12); }
         }
       </style>
       <div class="box" role="dialog" aria-label="翻译">
@@ -238,11 +241,21 @@
     box.style.top = `${best.top + window.scrollY}px`;
   }
 
-  function showPopup(range, content, cls) {
+  function showPopup(range, content, cls, synonyms = []) {
     ensurePopup();
     host.style.display = "block";
     bodyEl.className = `body ${cls || ""}`;
     bodyEl.textContent = content;
+    if (synonyms.length) {
+      // 单词的英文近义词，显示在译文下面一行
+      const syn = document.createElement("div");
+      syn.className = "syn";
+      const label = document.createElement("span");
+      label.className = "syn-label";
+      label.textContent = "近义词";
+      syn.append(label, synonyms.join(" · "));
+      bodyEl.append(syn);
+    }
     box.scrollTop = 0;
     placePopup(range);
   }
@@ -262,12 +275,35 @@
     }
   }
 
-  function requestTranslation(text) {
+  // 只划了一个词：英文等用空格分词的语言是一个不带空格的单词；中文、日文是不超过 4 个字的词
+  function isSingleWord(text) {
+    // 划词时常会顺带选上前后的标点，例如 "validate,"
+    const t = text.replace(/^[\p{P}\s]+|[\p{P}\s]+$/gu, "");
+    if (!t || /\s/.test(t)) return false;
+    if (/[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u.test(t)) {
+      return /^[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー]{1,4}$/u.test(t);
+    }
+    return /^[\p{L}\p{M}]+(?:['’-][\p{L}\p{M}]+)*$/u.test(t) && t.length <= 40;
+  }
+
+  // 单词所在的那句话，帮模型判断多义词在这里是什么意思
+  function contextOf(range) {
+    let el = range.startContainer;
+    if (el.nodeType !== Node.ELEMENT_NODE) el = el.parentElement;
+    let text = "";
+    for (let i = 0; el && i < 4; i++, el = el.parentElement) {
+      text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (text.length >= 40) break;
+    }
+    return text.slice(0, 400);
+  }
+
+  function requestTranslation(text, extra) {
     return new Promise((resolve) => {
       if (!extensionAlive()) return resolve({ ok: false, stale: true, error: STALE_MSG });
       try {
         chrome.runtime.sendMessage(
-          { type: "translate", items: [{ id: 0, text }], languageHint: "自动识别" },
+          { type: "translate", items: [{ id: 0, text, ...extra }], languageHint: "自动识别" },
           (res) => {
             const err = chrome.runtime.lastError;
             if (err) resolve({ ok: false, error: err.message });
@@ -284,10 +320,13 @@
   async function translateSelection(text, range) {
     const seq = ++requestSeq;
     showPopup(range, "翻译中…", "loading");
-    const res = await requestTranslation(text);
+    const word = isSingleWord(text);
+    const res = await requestTranslation(text, word ? { word: true, context: contextOf(range) } : {});
     if (seq !== requestSeq) return; // 期间用户又选了别的或关掉了弹窗
     if (res?.ok && res.translations?.length) {
-      showPopup(range, res.translations[0].text, "");
+      const t = res.translations[0];
+      const synonyms = word && Array.isArray(t.synonyms) ? t.synonyms.filter(Boolean).slice(0, 3) : [];
+      showPopup(range, t.text, "", synonyms);
     } else {
       const msg = res?.stale ? res.error : `翻译失败：${res?.error || "没有返回结果"}`;
       showPopup(range, msg, "error");
