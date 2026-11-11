@@ -329,10 +329,12 @@
     if (el.nodeType !== Node.ELEMENT_NODE) el = el.parentElement;
     let text = "";
     for (let i = 0; el && i < 4; i++, el = el.parentElement) {
+      if (el === document.body || el === document.documentElement) break;
       text = (el.textContent || "").replace(/\s+/g, " ").trim();
       if (text.length >= 40) break;
     }
-    return text.slice(0, 400);
+    // 太长说明找到的是整块页面（例如 Docs 的界面），不是那句话，宁可不给语境
+    return text.length > 2000 ? "" : text.slice(0, 400);
   }
 
   function requestTranslation(text, extra) {
@@ -581,11 +583,102 @@
     }
   }
 
+  // ---------- 自己画选区的网页（例如 Google Drive 的 PDF 预览） ----------
+  // 这类页面不用浏览器自带的选区，而是自己画蓝色高亮，
+  // 同时把选中的文字放进一个藏在屏幕外的 textarea，供复制使用。
+  // 插件直接读这个 textarea：不需要模拟复制，也完全不碰剪贴板。
+  let downPoint = null;
+  let hiddenBefore = new Map();
+
+  function isHiddenBox(t) {
+    if (t.getAttribute("aria-hidden") === "true") return true;
+    const r = t.getBoundingClientRect();
+    return (
+      r.width <= 2 || r.height <= 2 ||
+      r.right < 0 || r.bottom < 0 || r.left > innerWidth || r.top > innerHeight
+    );
+  }
+
+  function hiddenTextareas() {
+    return [...document.querySelectorAll("textarea")].filter(isHiddenBox);
+  }
+
+  // 没有真实选区时，给弹窗定位用的「假选区」：鼠标按下到松开所覆盖的区域
+  function pointRange(a, b) {
+    const left = Math.min(a.x, b.x);
+    const right = Math.max(a.x, b.x);
+    const top = Math.min(a.y, b.y) - 10;
+    const bottom = Math.max(a.y, b.y) + 10;
+    const rect = new DOMRect(left, top, Math.max(right - left, 1), bottom - top);
+    // 鼠标下方那行文字，用来给单词翻译提供语境
+    const under =
+      document.elementsFromPoint(b.x, b.y).find((el) => el.childElementCount === 0 && el.textContent.trim()) ||
+      document.body;
+    return { getBoundingClientRect: () => rect, getClientRects: () => [rect], startContainer: under };
+  }
+
+  function getDrawnSelection(upPoint) {
+    if (!downPoint) return null;
+    const moved = Math.hypot(upPoint.x - downPoint.x, upPoint.y - downPoint.y) > 3;
+    for (const t of hiddenTextareas()) {
+      const value = t.value.trim();
+      if (!value) continue;
+      // 拖动过鼠标，或者这次的文字和按下前不一样，才算新选中的内容
+      if (moved || value !== hiddenBefore.get(t)) {
+        return { text: value, range: pointRange(downPoint, upPoint) };
+      }
+    }
+    return null;
+  }
+
+  // ---------- Google 文档（Docs / Slides / Sheets） ----------
+  // Docs 把整篇文档画在画布上，选中的文字不在任何网页元素里。
+  // 但它会响应「复制」事件：插件自己造一个复制事件，附上一个空的数据容器，
+  // 发给 Docs 用来接收键盘输入的隐藏输入框，Docs 就会把选中的文字填进这个容器。
+  // 这个事件是插件自己造的，系统剪贴板完全不会被改动。
+  const COPY_PROBE_HOST = /(^|\.)docs\.google\.com$/;
+
+  // 当前获得焦点的元素；焦点在同源 iframe 里时（Docs 就是这样），继续往里找
+  function deepActiveElement() {
+    let el = document.activeElement;
+    while (el && el.tagName === "IFRAME") {
+      try {
+        const d = el.contentDocument;
+        if (!d) break;
+        el = d.activeElement || d.body;
+      } catch (_) {
+        break; // 跨域 iframe 进不去
+      }
+    }
+    return el;
+  }
+
+  function probeCopy(upPoint) {
+    if (!COPY_PROBE_HOST.test(location.hostname) || !downPoint) return null;
+    // 只在拖动过鼠标时才试，单击不算选中
+    if (Math.hypot(upPoint.x - downPoint.x, upPoint.y - downPoint.y) <= 3) return null;
+    const target = deepActiveElement();
+    if (!target) return null;
+    try {
+      const data = new DataTransfer();
+      target.dispatchEvent(
+        new ClipboardEvent("copy", { bubbles: true, cancelable: true, composed: true, clipboardData: data })
+      );
+      const text = data.getData("text/plain").trim();
+      if (text) return { text, range: pointRange(downPoint, upPoint) };
+    } catch (_) {}
+    return null;
+  }
+
   // ---------- 事件 ----------
   document.addEventListener(
     "mousedown",
     (e) => {
       if (!inPopup(e)) hidePopup();
+      if (e.button === 0 && !inPopup(e)) {
+        downPoint = { x: e.clientX, y: e.clientY };
+        hiddenBefore = new Map(hiddenTextareas().map((t) => [t, t.value.trim()]));
+      }
     },
     true
   );
@@ -647,15 +740,26 @@
       if (e.button !== 0 || !enabled || inPopup(e)) return;
       const path = e.composedPath();
       if (path.some((n) => n.matches?.("input, textarea, [contenteditable=''], [contenteditable='true']"))) return;
-      setTimeout(() => {
-        const got = getSelected(path);
-        if (!got) return;
+      const upPoint = { x: e.clientX, y: e.clientY };
+      const handle = (got) => {
+        if (!got) return false;
         const text = got.text.trim();
         // 最多约 15000 字符（英文两千多词），足够选一整篇文章
-        if (!text || text.length > 15000 || !LETTER.test(text)) return;
+        if (!text || text.length > 15000 || !LETTER.test(text)) return false;
         const rect = got.range.getBoundingClientRect();
-        if (!rect.width && !rect.height) return;
+        if (!rect.width && !rect.height) return false;
         translateSelection(text, got.range);
+        return true;
+      };
+      setTimeout(() => {
+        if (handle(getSelected(path))) return;
+        // 没有真实选区：可能是 Drive 这类自己画高亮的页面，稍等它把文字写进隐藏的 textarea；
+        // 再不行，如果是 Google 文档，就用复制事件向它要选中的文字
+        setTimeout(() => {
+          if (handle(getDrawnSelection(upPoint)) || handle(probeCopy(upPoint))) return;
+          // Docs 刚打开时第一次划选，有时要稍等一会儿才能取到文字，再试一次
+          if (COPY_PROBE_HOST.test(location.hostname)) setTimeout(() => handle(probeCopy(upPoint)), 250);
+        }, 40);
       }, 10);
     },
     true
