@@ -20,26 +20,25 @@
   }
   const HOST = topHost();
 
-  // 总开关打开、并且当前网站没有被停用，才翻译
+  // 总开关打开、并且当前网站不在 sites.js 的列表里，才翻译
+  const siteBlocked = isSiteBlocked(HOST, DEFAULT_BLOCKED_SITES);
   let switchOn = true;
-  let siteBlocked = isSiteBlocked(HOST, DEFAULT_BLOCKED_SITES);
   let enabled = switchOn && !siteBlocked;
   function refreshEnabled() {
     enabled = switchOn && !siteBlocked;
     if (!enabled) hidePopup(); // 关掉时顺手收起已经弹出的翻译
   }
 
-  chrome.storage.sync.get({ enabled: true, blockedSites: DEFAULT_BLOCKED_SITES }, (v) => {
+  chrome.storage.sync.get({ enabled: true }, (v) => {
     switchOn = v.enabled;
-    siteBlocked = isSiteBlocked(HOST, v.blockedSites);
     refreshEnabled();
   });
   chrome.storage.onChanged.addListener((c) => {
-    if (c.enabled) switchOn = c.enabled.newValue;
-    if (c.blockedSites) siteBlocked = isSiteBlocked(HOST, c.blockedSites.newValue);
-    if (c.enabled || c.blockedSites) refreshEnabled();
+    if (c.enabled) {
+      switchOn = c.enabled.newValue;
+      refreshEnabled();
+    }
   });
-
   // ---------- 弹窗（放在 Shadow DOM 里，不受网页样式影响） ----------
   let host = null;
   let box = null;
@@ -447,8 +446,16 @@
     ];
   }
 
-  // 已经填了 Claude 的 API Key：译文本身就来自 Claude，底部只留 ChatGPT 按钮
+  // 已经填了 Claude 的 API Key：译文本身就来自 Claude，底部只留 ChatGPT 按钮；
+  // 设置里关掉「显示用 ChatGPT 翻译」后，连这个按钮也不显示
+  let showGpt = true;
+  chrome.storage.sync.get({ showGpt: true }, (v) => (showGpt = v.showGpt));
+  chrome.storage.onChanged.addListener((c) => {
+    if (c.showGpt) showGpt = c.showGpt.newValue;
+  });
+
   function gptOnly(text, word) {
+    if (!showGpt) return [];
     return aiActions(text, word).filter((a) => a.id === "chatgpt");
   }
 

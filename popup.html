@@ -28,7 +28,7 @@
     .seg button small { display: block; font-size: 11px; font-weight: 400; color: #999; }
     .seg button:focus-visible { outline: 2px solid #d97757; outline-offset: -2px; }
 
-    /* 当前网站开关 */
+    /* 小开关行（「显示用 ChatGPT 翻译」） */
     .site { display: none; align-items: center; justify-content: space-between; gap: 10px; margin: -4px 0 14px; padding: 8px 10px; border-radius: 8px; background: #f6f6f6; }
     .site.show { display: flex; }
     .site-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #555; }
@@ -60,10 +60,10 @@
       <button type="button" data-mode="opus" role="radio">Opus 5.5<small>文学 · 细腻</small></button>
     </div>
   </div>
-  <div class="site" id="site">
-    <span class="site-text">在 <b id="siteName"></b> 上翻译</span>
-    <label class="switch" title="只对这个网站开启或关闭翻译">
-      <input id="siteOn" type="checkbox" />
+  <div class="site" id="gptRow">
+    <span class="site-text">显示「<b>用 ChatGPT 翻译</b>」</span>
+    <label class="switch" title="在翻译弹窗底部显示或隐藏「用 ChatGPT 翻译」按钮">
+      <input id="showGpt" type="checkbox" />
       <span class="track"></span>
     </label>
   </div>
@@ -71,7 +71,6 @@
   <input id="key" type="password" placeholder="sk-ant-..." />
   <button id="save">保存 Key</button>
   <div id="status"></div>
-  <script src="sites.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

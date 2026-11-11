@@ -1,6 +1,6 @@
 // 在这些网站上默认不翻译（主要是 AI 聊天网站）。
 // 子域名也算在内，例如 "openai.com" 也包括 "chat.openai.com"。
-// 设置窗口里可以对当前网站单独开启/关闭，改动会存进 blockedSites。
+// 想增减网站，直接改这个列表，然后在 chrome://extensions 里刷新插件。
 const DEFAULT_BLOCKED_SITES = [
   "chatgpt.com",
   "chat.openai.com",

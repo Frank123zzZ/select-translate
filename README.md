@@ -23,7 +23,7 @@
 - 弹窗自动放在选区附近的空白处；附近全是文字时放在选区上方，不挡住下文
 - 支持网页里嵌入的 PDF 阅读器（如 Brightspace）和网页组件（Shadow DOM）
 - 两种模型可切换：**Sonnet 5.5**（日常、快速）/ **Opus 5.5**（文学、细腻）
-- 总开关 + 按网站开关；ChatGPT、Claude、Gemini 等 AI 网站默认不翻译（列表见 `sites.js`）
+- 设置窗口右上角有总开关；ChatGPT、Claude、Gemini 等 AI 网站不翻译（列表见 `sites.js`，改完在 `chrome://extensions` 里刷新插件即可）
 
 ## 安装
 
@@ -38,7 +38,7 @@ API Key 在 [platform.claude.com](https://platform.claude.com) 创建，按用�
 - **Chrome 内置翻译**：不填 Key 时，自动改用 Chrome 自带的 AI 翻译（Translator API），免费、在本机运行。需要较新版本的 Chrome（138 及以上），第一次使用某个语言时会先下载翻译模型。没有近义词和 Opus 文学模式，质量也不如 Claude。
 - **用 Claude / ChatGPT 翻译**：弹窗底部有按钮，点一下会打开 claude.ai 或 chatgpt.com，翻译要求和选中的文字已经填好，用的是你自己的 Claude 或 ChatGPT 账号。
   - 没填 Key：显示「用 Claude 翻译」和「用 ChatGPT 翻译」两个按钮
-  - 填了 Claude 的 Key：译文已经来自 Claude，只显示「用 ChatGPT 翻译」，方便对比或在 ChatGPT 里追问
+  - 填了 Claude 的 Key：译文已经来自 Claude，只显示「用 ChatGPT 翻译」，方便对比或在 ChatGPT 里追问；不需要的话，可在设置窗口里关掉「显示『用 ChatGPT 翻译』」
 
 ## 文件
 

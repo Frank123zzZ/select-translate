@@ -120,6 +120,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return true; // 异步响应
 });
 
+// 旧版本存过按网站开关的设置（blockedSites），现在只用 sites.js，安装或更新时清掉一次
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.storage.sync.remove("blockedSites");
+});
+
 // 关闭翻译时，在工具栏图标上显示 “OFF”
 function updateBadge(on) {
   chrome.action.setBadgeText({ text: on ? "" : "OFF" });

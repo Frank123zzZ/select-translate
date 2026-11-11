@@ -8,7 +8,17 @@ const NO_KEY_HINT = "未填 Key：使用 Chrome 内置免费翻译";
 function showKeyHint(key) {
   statusEl.textContent = key ? "" : NO_KEY_HINT;
   statusEl.style.color = key ? "" : "#999";
+  // 「用 ChatGPT 翻译」开关只对填了 Key 的用户有意义；没填 Key 时两个按钮总是显示
+  gptRowEl.classList.toggle("show", Boolean(key));
 }
+
+// ---------- 「用 ChatGPT 翻译」按钮开关 ----------
+const gptRowEl = document.getElementById("gptRow");
+const showGptEl = document.getElementById("showGpt");
+chrome.storage.sync.get({ showGpt: true }, (v) => (showGptEl.checked = v.showGpt));
+showGptEl.addEventListener("change", () => {
+  chrome.storage.sync.set({ showGpt: showGptEl.checked });
+});
 
 function showState(on) {
   enabledEl.checked = on;
@@ -48,49 +58,13 @@ enabledEl.addEventListener("change", () => {
   chrome.storage.sync.set({ enabled: on }, () => showState(on));
 });
 
-// ---------- 当前网站开关 ----------
-const siteEl = document.getElementById("site");
-const siteNameEl = document.getElementById("siteName");
-const siteOnEl = document.getElementById("siteOn");
-let currentHost = "";
-
-chrome.tabs.query({ active: true, currentWindow: true }, ([tab]) => {
-  let url;
-  try {
-    url = new URL(tab?.url || "");
-  } catch (_) {
-    return;
-  }
-  if (!/^https?:$/.test(url.protocol)) return; // chrome:// 等页面不显示
-  currentHost = normalizeHost(url.hostname);
-  siteNameEl.textContent = currentHost;
-  siteEl.title = currentHost;
-  chrome.storage.sync.get({ blockedSites: DEFAULT_BLOCKED_SITES }, (v) => {
-    siteOnEl.checked = !isSiteBlocked(currentHost, v.blockedSites);
-    siteEl.classList.add("show");
-  });
-});
-
-siteOnEl.addEventListener("change", () => {
-  const on = siteOnEl.checked;
-  chrome.storage.sync.get({ blockedSites: DEFAULT_BLOCKED_SITES }, (v) => {
-    let list = v.blockedSites.slice();
-    if (on) {
-      // 开启：去掉所有能匹配到当前网站的条目
-      list = list.filter((s) => !siteMatches(currentHost, s));
-    } else if (!isSiteBlocked(currentHost, list)) {
-      list.push(currentHost);
-    }
-    chrome.storage.sync.set({ blockedSites: list });
-  });
-});
-
 document.getElementById("save").addEventListener("click", () => {
   const key = keyEl.value.trim();
   chrome.storage.sync.set({ apiKey: key }, () => {
     if (key) {
       statusEl.textContent = "Key 已保存 ✓";
       statusEl.style.color = "";
+      gptRowEl.classList.add("show");
     } else {
       showKeyHint("");
     }
