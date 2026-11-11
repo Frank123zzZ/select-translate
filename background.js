@@ -53,7 +53,14 @@ const OUTPUT_SCHEMA = {
   additionalProperties: false
 };
 
-async function translateBatch(items, languageHint) {
+const SUMMARY_PROMPT =
+  "你是阅读助手。用户会给你一段从网页上选中的长文。请总结这段内容：\n" +
+  "先用一两句话概括主旨，再列出 3 到 6 个要点，每个要点单独一行，以「• 」开头。\n" +
+  "总结用的语言：如果原文主体是简体中文，用英文写；其他情况（包括繁体中文）一律用简体中文写。\n" +
+  "只输出总结本身，不要加标题或开场白。";
+
+// 调用 Claude，返回第一段文字；format 为 JSON schema 时要求按格式输出
+async function callClaude({ system, content, format, maxTokens = 16000 }) {
   const { apiKey, mode } = await chrome.storage.sync.get({ apiKey: "", mode: "sonnet" });
   if (!apiKey) {
     // 没有 Key 时由网页里的脚本改用 Chrome 内置翻译
@@ -62,6 +69,8 @@ async function translateBatch(items, languageHint) {
     throw err;
   }
   const cfg = MODES[mode] || MODES.sonnet;
+  const output_config = { effort: cfg.effort };
+  if (format) output_config.format = { type: "json_schema", schema: format };
 
   const res = await fetch(API_URL, {
     method: "POST",
@@ -74,20 +83,12 @@ async function translateBatch(items, languageHint) {
     },
     body: JSON.stringify({
       model: cfg.model,
-      max_tokens: 16000,
+      max_tokens: maxTokens,
       // 被安全分类器误拒时，服务端自动换模型重试
       fallbacks: "default",
-      output_config: {
-        effort: cfg.effort,
-        format: { type: "json_schema", schema: OUTPUT_SCHEMA }
-      },
-      system: cfg.style + BASE_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `源语言类别：${languageHint}\n\n${JSON.stringify(items)}`
-        }
-      ]
+      output_config,
+      system: typeof system === "function" ? system(cfg) : system,
+      messages: [{ role: "user", content }]
     })
   });
 
@@ -108,16 +109,36 @@ async function translateBatch(items, languageHint) {
 
   const textBlock = (data.content || []).find((b) => b.type === "text");
   if (!textBlock) throw new Error("返回中没有文本");
-  const parsed = JSON.parse(textBlock.text);
-  return parsed.translations || [];
+  return textBlock.text;
+}
+
+async function translateBatch(items, languageHint) {
+  const text = await callClaude({
+    system: (cfg) => cfg.style + BASE_PROMPT,
+    content: `源语言类别：${languageHint}\n\n${JSON.stringify(items)}`,
+    format: OUTPUT_SCHEMA
+  });
+  return JSON.parse(text).translations || [];
+}
+
+async function summarize(text) {
+  return (await callClaude({ system: SUMMARY_PROMPT, content: text, maxTokens: 4000 })).trim();
 }
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-  if (msg?.type !== "translate") return;
-  translateBatch(msg.items, msg.languageHint)
-    .then((translations) => sendResponse({ ok: true, translations }))
-    .catch((e) => sendResponse({ ok: false, code: e.code, error: String(e.message || e) }));
-  return true; // 异步响应
+  const fail = (e) => sendResponse({ ok: false, code: e.code, error: String(e.message || e) });
+  if (msg?.type === "translate") {
+    translateBatch(msg.items, msg.languageHint)
+      .then((translations) => sendResponse({ ok: true, translations }))
+      .catch(fail);
+    return true; // 异步响应
+  }
+  if (msg?.type === "summarize") {
+    summarize(msg.text)
+      .then((summary) => sendResponse({ ok: true, summary }))
+      .catch(fail);
+    return true;
+  }
 });
 
 // 旧版本存过按网站开关的设置（blockedSites），现在只用 sites.js，安装或更新时清掉一次

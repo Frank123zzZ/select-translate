@@ -88,6 +88,11 @@
           font: inherit; color: #d97757;
         }
         .foot button:hover { text-decoration: underline; }
+        .foot button.primary {
+          padding: 1px 10px; border-radius: 10px;
+          background: #d97757; color: #fff; text-decoration: none;
+        }
+        .foot button.primary:hover { background: #c4633f; text-decoration: none; }
         @media (prefers-color-scheme: dark) {
           .box { background: #2b2b2b; color: #eee; border-color: rgba(255,255,255,0.12); }
           .close:hover { color: #fff; }
@@ -243,7 +248,10 @@
       // 附近全是文字：放在选区上方，不挡住下文；上方放不下才放下方
       const left = Math.max(MARGIN, Math.min(sel.left, vw - w - MARGIN));
       const above = sel.top - h - GAP;
-      best = above >= MARGIN ? { left, top: above } : { left, top: sel.bottom + GAP };
+      let top = above >= MARGIN ? above : sel.bottom + GAP;
+      // 选区很长、占满整屏时，上下都放不下：留在屏幕内，宁可盖住一部分文字
+      top = Math.max(MARGIN, Math.min(top, vh - h - MARGIN));
+      best = { left, top };
     }
 
     // 用页面坐标定位，这样页面滚动时弹窗跟着选中的文字走
@@ -275,7 +283,9 @@
         const btn = document.createElement("button");
         btn.type = "button";
         btn.textContent = a.label;
+        if (a.primary) btn.className = "primary";
         btn.addEventListener("click", () => {
+          if (a.onClick) return a.onClick(); // 弹窗内的操作，例如「总结」/「显示译文」
           window.open(a.url, "_blank", "noopener");
           hidePopup();
         });
@@ -459,6 +469,76 @@
     return aiActions(text, word).filter((a) => a.id === "chatgpt");
   }
 
+  // ---------- 长文总结 ----------
+  const SUMMARY_MIN_WORDS = 400;
+
+  // 估算词数：英文等按单词数；中文、日文按字数 ÷ 1.5（大约一个词 1.5 个字）
+  const CJK_RE = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/gu;
+  function countWords(text) {
+    const cjk = (text.match(CJK_RE) || []).length;
+    const rest = text.replace(CJK_RE, " ");
+    const words = (rest.match(/[\p{L}\p{N}]+(?:['’-][\p{L}\p{N}]+)*/gu) || []).length;
+    return words + Math.round(cjk / 1.5);
+  }
+
+  function requestSummary(text) {
+    return new Promise((resolve) => {
+      if (!extensionAlive()) return resolve({ ok: false, stale: true, error: STALE_MSG });
+      try {
+        chrome.runtime.sendMessage({ type: "summarize", text }, (res) => {
+          const err = chrome.runtime.lastError;
+          if (err) resolve({ ok: false, error: err.message });
+          else resolve(res);
+        });
+      } catch (e) {
+        const stale = /context invalidated/i.test(String(e?.message));
+        resolve({ ok: false, stale, error: stale ? STALE_MSG : String(e?.message || e) });
+      }
+    });
+  }
+
+  // 显示 Claude 的译文；长文在底部多一个「总结」按钮，按一下换成总结，再按一下换回译文
+  function showTranslationView(range, text, word, t, seq) {
+    const synonyms = word && Array.isArray(t.synonyms) ? t.synonyms.filter(Boolean).slice(0, 3) : [];
+    const gpt = gptOnly(text, word);
+    if (countWords(text) < SUMMARY_MIN_WORDS) {
+      showPopup(range, t.text, "", { synonyms, actions: gpt });
+      return;
+    }
+
+    let summary = null; // 总结只请求一次，之后来回切换直接用缓存
+    let view = "translation";
+    const showTranslation = () => {
+      view = "translation";
+      showPopup(range, t.text, "", {
+        actions: [{ label: "总结", primary: true, onClick: showSummary }, ...gpt]
+      });
+    };
+    const showSummary = async () => {
+      view = "summary";
+      if (!summary) {
+        showPopup(range, "正在总结…", "loading", {
+          actions: [{ label: "显示译文", primary: true, onClick: showTranslation }]
+        });
+        const res = await requestSummary(text);
+        if (seq !== requestSeq) return; // 弹窗已关闭或换了别的选区
+        if (res?.ok && res.summary) summary = res.summary;
+        if (view !== "summary") return; // 等待期间已经切回译文
+        if (!summary) {
+          showPopup(range, `总结失败：${res?.error || "没有返回结果"}`, "error", {
+            actions: [{ label: "显示译文", primary: true, onClick: showTranslation }]
+          });
+          return;
+        }
+      }
+      showPopup(range, summary, "", {
+        note: "全文总结",
+        actions: [{ label: "显示译文", primary: true, onClick: showTranslation }, ...gpt]
+      });
+    };
+    showTranslation();
+  }
+
   async function translateSelection(text, range) {
     const seq = ++requestSeq;
     showPopup(range, "翻译中…", "loading");
@@ -466,9 +546,7 @@
     const res = await requestTranslation(text, word ? { word: true, context: contextOf(range) } : {});
     if (seq !== requestSeq) return; // 期间用户又选了别的或关掉了弹窗
     if (res?.ok && res.translations?.length) {
-      const t = res.translations[0];
-      const synonyms = word && Array.isArray(t.synonyms) ? t.synonyms.filter(Boolean).slice(0, 3) : [];
-      showPopup(range, t.text, "", { synonyms, actions: gptOnly(text, word) });
+      showTranslationView(range, text, word, res.translations[0], seq);
       return;
     }
     if (res?.code === "NO_KEY") {
@@ -573,7 +651,8 @@
         const got = getSelected(path);
         if (!got) return;
         const text = got.text.trim();
-        if (!text || text.length > 5000 || !LETTER.test(text)) return;
+        // 最多约 15000 字符（英文两千多词），足够选一整篇文章
+        if (!text || text.length > 15000 || !LETTER.test(text)) return;
         const rect = got.range.getBoundingClientRect();
         if (!rect.width && !rect.height) return;
         translateSelection(text, got.range);
