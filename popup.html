@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    body { width: 280px; margin: 0; padding: 14px; font: 13px/1.5 -apple-system, "Microsoft YaHei", sans-serif; color: #222; }
+    h1 { font-size: 15px; margin: 0; }
+    .header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+
+    /* 开关 */
+    .switch { display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+    .switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+    .track { position: relative; width: 40px; height: 22px; border-radius: 11px; background: #ccc; transition: background .2s; flex: none; }
+    .track::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.3); transition: transform .2s; }
+    .switch input:checked + .track { background: #d97757; }
+    .switch input:checked + .track::after { transform: translateX(18px); }
+    .switch input:focus-visible + .track { outline: 2px solid #d97757; outline-offset: 2px; }
+    #stateText { font-size: 12px; color: #777; min-width: 36px; text-align: right; }
+
+    /* 模型滑块：两档，滑块在两个选项之间滑动 */
+    .mode { margin-bottom: 14px; }
+    .mode-title { display: block; margin: 0 0 6px; }
+    .seg { position: relative; display: flex; padding: 3px; border-radius: 9px; background: #eee; }
+    .seg .thumb { position: absolute; top: 3px; bottom: 3px; left: 3px; width: calc(50% - 3px); border-radius: 7px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.2); transition: transform .2s; }
+    .seg[data-mode="opus"] .thumb { transform: translateX(100%); }
+    .seg button { position: relative; flex: 1; margin: 0; padding: 5px 0; background: none; color: #666; border-radius: 7px; line-height: 1.3; }
+    .seg button.active { color: #d97757; font-weight: 600; }
+    .seg button small { display: block; font-size: 11px; font-weight: 400; color: #999; }
+    .seg button:focus-visible { outline: 2px solid #d97757; outline-offset: -2px; }
+
+    /* 当前网站开关 */
+    .site { display: none; align-items: center; justify-content: space-between; gap: 10px; margin: -4px 0 14px; padding: 8px 10px; border-radius: 8px; background: #f6f6f6; }
+    .site.show { display: flex; }
+    .site-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #555; }
+    .site-text b { color: #222; font-weight: 600; }
+    .site .track { width: 34px; height: 20px; }
+    .site .track::after { width: 14px; height: 14px; }
+    .site .switch input:checked + .track::after { transform: translateX(14px); }
+
+    label.field { display: block; margin: 0 0 4px; }
+    input[type=password] { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 6px; }
+    button { margin-top: 10px; width: 100%; padding: 7px; border: 0; border-radius: 6px; background: #d97757; color: #fff; cursor: pointer; }
+    #status { color: #2a8; font-size: 12px; min-height: 18px; margin-top: 4px; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>划词翻译</h1>
+    <label class="switch" title="开启或关闭划词翻译">
+      <span id="stateText"></span>
+      <input id="enabled" type="checkbox" />
+      <span class="track"></span>
+    </label>
+  </div>
+  <div class="mode">
+    <span class="mode-title">翻译模型</span>
+    <div class="seg" id="seg" data-mode="sonnet" role="radiogroup" aria-label="翻译模型">
+      <span class="thumb"></span>
+      <button type="button" data-mode="sonnet" role="radio">Sonnet 5.5<small>日常 · 快速</small></button>
+      <button type="button" data-mode="opus" role="radio">Opus 5.5<small>文学 · 细腻</small></button>
+    </div>
+  </div>
+  <div class="site" id="site">
+    <span class="site-text">在 <b id="siteName"></b> 上翻译</span>
+    <label class="switch" title="只对这个网站开启或关闭翻译">
+      <input id="siteOn" type="checkbox" />
+      <span class="track"></span>
+    </label>
+  </div>
+  <label class="field" for="key">Anthropic API Key</label>
+  <input id="key" type="password" placeholder="sk-ant-..." />
+  <button id="save">保存 Key</button>
+  <div id="status"></div>
+  <script src="sites.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
