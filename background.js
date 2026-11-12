@@ -73,21 +73,34 @@ const SUMMARY_PROMPT =
   "只输出总结本身，不要加标题或开场白。\n" +
   "数学公式：" + MATH_RULES;
 
-// 截图翻译：先认出图里的文字，再按同样的规则翻译
-const IMAGE_PROMPT =
-  "你是专业翻译。用户从网页（常常是 PDF 论文）上截了一块图。\n" +
-  "先把图中的文字原样识别出来写进 original，再翻译写进 translation。\n" +
+// 截图翻译的两种情况：
+// 1) 有蓝色高亮：只翻译高亮的文字；2) 没有高亮、用户自己框选了一块：翻译框里的全部文字
+const IMAGE_COMMON =
+  "原样识别出来的文字写进 original，翻译写进 translation。\n" +
   DIRECTION_RULES +
-  "只处理图里实际出现的内容；被截断、只露出一半的行可以略去。看不清的字用 [?] 标出，不要编造。\n" +
+  "看不清的字用 [?] 标出，不要编造。\n" +
   "数学公式（original 和 translation 都适用）：" + MATH_RULES;
+
+const IMAGE_PROMPT_HIGHLIGHT =
+  "你是专业翻译。这是一张网页（常常是 PDF 论文）的局部截图，其中带浅蓝色背景高亮的文字是用户选中、想要翻译的部分。\n" +
+  "只识别并翻译高亮的文字；高亮以外的文字只用来理解上下文，不要识别也不要翻译。高亮跨多行时，按阅读顺序连起来。\n" +
+  "如果图里其实没有被浅蓝色高亮的、看得清的文字（例如只是蓝色的边框、按钮、缩略图，或字太小看不清），" +
+  "found 设为 false，original 和 translation 都留空；否则 found 设为 true。\n" +
+  IMAGE_COMMON;
+
+const IMAGE_PROMPT_REGION =
+  "你是专业翻译。用户从网页（常常是 PDF 论文）上框选截了一块图。\n" +
+  "识别并翻译图中的全部文字；被截断、只露出一半的行可以略去。found 设为 true。\n" +
+  IMAGE_COMMON;
 
 const IMAGE_SCHEMA = {
   type: "object",
   properties: {
+    found: { type: "boolean" },
     original: { type: "string" },
     translation: { type: "string" }
   },
-  required: ["original", "translation"],
+  required: ["found", "original", "translation"],
   additionalProperties: false
 };
 
@@ -157,12 +170,12 @@ async function summarize(text) {
   return (await callClaude({ system: SUMMARY_PROMPT, content: text, maxTokens: 4000 })).trim();
 }
 
-async function translateImage(base64, mediaType) {
+async function translateImage(base64, mediaType, highlight) {
   const text = await callClaude({
-    system: (cfg) => cfg.style + IMAGE_PROMPT,
+    system: (cfg) => cfg.style + (highlight ? IMAGE_PROMPT_HIGHLIGHT : IMAGE_PROMPT_REGION),
     content: [
       { type: "image", source: { type: "base64", media_type: mediaType, data: base64 } },
-      { type: "text", text: "请识别并翻译这张截图里的文字。" }
+      { type: "text", text: highlight ? "请识别并翻译截图里蓝色高亮的文字。" : "请识别并翻译这张截图里的文字。" }
     ],
     format: IMAGE_SCHEMA,
     maxTokens: 8000
@@ -170,20 +183,130 @@ async function translateImage(base64, mediaType) {
   return JSON.parse(text);
 }
 
-// ---------- 截图翻译（Alt+T，或设置窗口里的按钮） ----------
-// Chrome 自带的 PDF 阅读器不让插件读文字，也收不到鼠标事件。
-// 所以：截下当前标签页 → 在一个同样大小的窗口里显示截图 → 用户框选 → 把框选部分发给 Claude 识别并翻译。
-async function startSnip(tab) {
-  if (!tab) [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) return;
-  try {
-    const image = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-    await chrome.storage.session.set({ snip: { image } });
-  } catch (e) {
-    await chrome.storage.session.set({
-      snip: { error: "这个页面不允许截图（例如 Chrome 的设置页、扩展商店页面）。" }
-    });
+// ---------- 高亮截图翻译（快捷键，默认 Alt+T） ----------
+// Chrome 自带的 PDF 阅读器不让插件读文字，也收不到鼠标和键盘事件。
+// 做法：用户先在 PDF 里划选（文字变蓝）→ 按快捷键 → 后台截下当前页面（不显示给用户）
+// → 找出蓝色高亮的区域 → 只把这一块交给 Claude 识别并翻译 → 结果显示在工具栏图标弹出的小窗里。
+const MAX_EDGE = 1568; // 发给 Claude 的图片最长边，再大也不会更清楚，只会更贵
+
+// 浅蓝色的选中高亮（PDF 阅读器和普通网页的选区颜色都在这个范围）；深蓝色的文字、链接不算
+function isHighlight(r, g, b) {
+  return b >= 200 && b - r >= 40 && b - g >= 8 && r >= 90 && r <= 215 && g >= 140;
+}
+
+// 在截图里找蓝色高亮：按 10×10 的小格统计，高亮像素占到一半左右的格子才算；
+// 这样细细的蓝色边框（例如缩略图的选中框）不会被当成高亮。再取连在一起的最大一片。
+async function findHighlight(bitmap) {
+  const W = bitmap.width;
+  const H = bitmap.height;
+  const canvas = new OffscreenCanvas(W, H);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(bitmap, 0, 0);
+  const { data } = ctx.getImageData(0, 0, W, H);
+
+  const CELL = 10;
+  const cols = Math.ceil(W / CELL);
+  const rows = Math.ceil(H / CELL);
+  const marked = new Uint8Array(cols * rows);
+  for (let cy = 0; cy < rows; cy++) {
+    for (let cx = 0; cx < cols; cx++) {
+      let hit = 0;
+      let total = 0;
+      for (let y = cy * CELL; y < Math.min(H, cy * CELL + CELL); y += 2) {
+        for (let x = cx * CELL; x < Math.min(W, cx * CELL + CELL); x += 2) {
+          const i = (y * W + x) * 4;
+          total++;
+          if (isHighlight(data[i], data[i + 1], data[i + 2])) hit++;
+        }
+      }
+      if (hit / total >= 0.45) marked[cy * cols + cx] = 1;
+    }
   }
+
+  // 相距两格以内的高亮格算作同一片（多行选区之间有行距的空白）
+  const seen = new Uint8Array(cols * rows);
+  let best = null;
+  for (let start = 0; start < marked.length; start++) {
+    if (!marked[start] || seen[start]) continue;
+    const stack = [start];
+    seen[start] = 1;
+    const box = { minX: cols, minY: rows, maxX: -1, maxY: -1, count: 0 };
+    while (stack.length) {
+      const k = stack.pop();
+      const x = k % cols;
+      const y = (k - x) / cols;
+      box.count++;
+      box.minX = Math.min(box.minX, x);
+      box.maxX = Math.max(box.maxX, x);
+      box.minY = Math.min(box.minY, y);
+      box.maxY = Math.max(box.maxY, y);
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          const nx = x + dx;
+          const ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
+          const n = ny * cols + nx;
+          if (marked[n] && !seen[n]) {
+            seen[n] = 1;
+            stack.push(n);
+          }
+        }
+      }
+    }
+    // 真正的文字高亮至少有几个字宽、一行字高；细长的蓝线不算。
+    // 高亮是实心的一块，缩略图的选中框是空心的框：框住的范围里蓝色格子太少就不算
+    const w = box.maxX - box.minX + 1;
+    const h = box.maxY - box.minY + 1;
+    if (w < 3 || h < 2) continue;
+    if (box.count / (w * h) < 0.4) continue;
+    if (!best || box.count > best.count) best = box;
+  }
+  if (!best) return null;
+  return {
+    x: best.minX * CELL,
+    y: best.minY * CELL,
+    width: (best.maxX - best.minX + 1) * CELL,
+    height: (best.maxY - best.minY + 1) * CELL
+  };
+}
+
+// 高亮区域四周多留一点，让 Claude 看得到上下文；太大就缩小
+async function cropToBase64(bitmap, box) {
+  const pad = 40;
+  const sx = Math.max(0, box.x - pad);
+  const sy = Math.max(0, box.y - pad);
+  const ex = Math.min(bitmap.width, box.x + box.width + pad);
+  const ey = Math.min(bitmap.height, box.y + box.height + pad);
+  const sw = ex - sx;
+  const sh = ey - sy;
+  const shrink = Math.min(1, MAX_EDGE / Math.max(sw, sh));
+  const canvas = new OffscreenCanvas(Math.round(sw * shrink), Math.round(sh * shrink));
+  canvas.getContext("2d").drawImage(bitmap, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+  const blob = await canvas.convertToBlob({ type: "image/png" });
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+// 结果存在 session 存储里，工具栏弹窗打开后读取并跟着更新
+async function setPdfResult(result) {
+  await chrome.storage.session.set({ pdfResult: { ...result, at: Date.now() } });
+}
+
+// 打开工具栏弹窗显示结果；打不开时（例如窗口没有焦点）在图标上标个「译」，点图标也能看到
+async function showResultPopup() {
+  try {
+    await chrome.action.openPopup();
+  } catch (_) {
+    chrome.action.setBadgeText({ text: "译" });
+    chrome.action.setBadgeBackgroundColor({ color: "#d97757" });
+  }
+}
+
+// 没有蓝色高亮：打开框选窗口，让用户自己框出要翻译的区域
+async function openSnipWindow(tab, dataUrl) {
+  await chrome.storage.session.set({ snip: { image: dataUrl } });
   const win = await chrome.windows.get(tab.windowId);
   const opts = { url: chrome.runtime.getURL("snip.html"), type: "popup", focused: true };
   if (win.state === "maximized" || win.state === "fullscreen") opts.state = "maximized";
@@ -191,8 +314,66 @@ async function startSnip(tab) {
   await chrome.windows.create(opts);
 }
 
-chrome.commands.onCommand.addListener((command, tab) => {
-  if (command === "snip-translate") startSnip(tab);
+async function translateHighlight(tab) {
+  if (!tab) [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) return;
+
+  let dataUrl;
+  try {
+    dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+  } catch (_) {
+    await setPdfResult({ status: "error", error: "这个页面不允许截图（例如 Chrome 的设置页、扩展商店页面）。" });
+    await showResultPopup();
+    return;
+  }
+
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const box = await findHighlight(bitmap);
+  if (!box) {
+    await openSnipWindow(tab, dataUrl);
+    return;
+  }
+
+  await setPdfResult({ status: "loading" });
+  await showResultPopup();
+  try {
+    const data = await cropToBase64(bitmap, box);
+    const r = await translateImage(data, "image/png", true);
+    if (!r.found || !String(r.translation || "").trim()) {
+      // Claude 看了说没有选中的文字：多半是把别的蓝色东西当成了高亮，改为让用户自己框选
+      await chrome.storage.session.remove("pdfResult");
+      await openSnipWindow(tab, dataUrl);
+      return;
+    }
+    await setPdfResult({ status: "done", translation: r.translation, original: r.original });
+  } catch (e) {
+    const msg = e.code === "NO_KEY" ? "截图翻译需要先在插件设置里填写 Anthropic API Key。" : String(e.message || e);
+    await setPdfResult({ status: "error", error: msg });
+  }
+}
+
+// 按下快捷键后，图标上先显示「…」，让用户知道插件收到了；做完恢复原来的状态
+async function restoreBadge() {
+  // 已经换成了「译」（提示用户点图标看结果）就不动它
+  if ((await chrome.action.getBadgeText({})) !== "…") return;
+  const { enabled } = await chrome.storage.sync.get({ enabled: true });
+  chrome.action.setBadgeText({ text: enabled ? "" : "OFF" });
+  chrome.action.setBadgeBackgroundColor({ color: "#888" });
+}
+
+chrome.commands.onCommand.addListener(async (command, tab) => {
+  if (command !== "snip-translate") return;
+  chrome.action.setBadgeText({ text: "…" });
+  chrome.action.setBadgeBackgroundColor({ color: "#d97757" });
+  try {
+    await translateHighlight(tab);
+    await restoreBadge();
+  } catch (e) {
+    // 任何一步出错都显示出来，不再悄悄失败
+    await restoreBadge();
+    await setPdfResult({ status: "error", error: `截图翻译出错：${e?.message || e}` });
+    await showResultPopup();
+  }
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -210,13 +391,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     return true;
   }
   if (msg?.type === "translateImage") {
-    translateImage(msg.data, msg.mediaType)
+    // 框选窗口里用户自己框出的区域
+    translateImage(msg.data, msg.mediaType, false)
       .then((result) => sendResponse({ ok: true, ...result }))
       .catch(fail);
     return true;
-  }
-  if (msg?.type === "startSnip") {
-    startSnip().catch(() => {});
   }
 });
 

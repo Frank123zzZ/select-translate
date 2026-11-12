@@ -10,16 +10,53 @@ function showKeyHint(key) {
   statusEl.style.color = key ? "" : "#999";
 }
 
-// ---------- 截图翻译按钮（和快捷键效果一样） ----------
-document.getElementById("snip").addEventListener("click", () => {
-  chrome.runtime.sendMessage({ type: "startSnip" });
-  window.close();
+// ---------- 截图翻译结果（Alt+T 后由后台写入，弹窗打开时显示） ----------
+// 两分钟内的结果才显示；否则就是普通的设置窗口
+const RESULT_FRESH_MS = 2 * 60 * 1000;
+const resultTextEl = document.getElementById("resultText");
+const origWrapEl = document.getElementById("origWrap");
+const origTextEl = document.getElementById("origText");
+let mathLib = null;
+
+async function renderResult(r) {
+  if (!r || Date.now() - r.at > RESULT_FRESH_MS) return;
+  document.body.classList.add("result-mode");
+  if (!mathLib) {
+    mathLib = await import("./lib/mathtext.mjs");
+    document.getElementById("mathCss").textContent = mathLib.MATH_CSS;
+  }
+  resultTextEl.textContent = "";
+  origTextEl.textContent = "";
+  origWrapEl.style.display = "none";
+  if (r.status === "loading") {
+    resultTextEl.className = "loading";
+    resultTextEl.textContent = "识别并翻译中…";
+  } else if (r.status === "error") {
+    resultTextEl.className = "error";
+    resultTextEl.textContent = r.error || "翻译失败";
+  } else {
+    resultTextEl.className = "";
+    mathLib.fillWithMath(resultTextEl, r.translation || "（没有识别到文字）");
+    if (r.original) {
+      mathLib.fillWithMath(origTextEl, r.original);
+      origWrapEl.style.display = "block";
+    }
+  }
+  // 公式的字形会比文字行略高几个像素；只有译文真的很长时才显示滚动条
+  resultTextEl.style.overflowY = resultTextEl.scrollHeight - resultTextEl.clientHeight > 4 ? "auto" : "hidden";
+}
+
+chrome.storage.session.get("pdfResult", (v) => renderResult(v.pdfResult));
+chrome.storage.onChanged.addListener((c, area) => {
+  if (area === "session" && c.pdfResult) renderResult(c.pdfResult.newValue);
 });
-// 显示当前设置的快捷键（用户可以在 chrome://extensions/shortcuts 里改）
-chrome.commands.getAll((cmds) => {
-  const c = cmds.find((x) => x.name === "snip-translate");
-  document.getElementById("snipKey").textContent = c?.shortcut ? `（${c.shortcut}）` : "";
+document.getElementById("toSettings").addEventListener("click", () => {
+  document.body.classList.remove("result-mode");
+  chrome.storage.session.remove("pdfResult"); // 看过了，下次点图标直接进设置
 });
+
+// 打开弹窗后去掉图标上的「译」提示，恢复开关状态的显示
+chrome.storage.sync.get({ enabled: true }, (v) => chrome.action.setBadgeText({ text: v.enabled ? "" : "OFF" }));
 
 function showState(on) {
   enabledEl.checked = on;

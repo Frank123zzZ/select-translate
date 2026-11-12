@@ -1,5 +1,5 @@
 // 截图翻译页：显示刚截下的网页截图，用户框选一块，发给 Claude 识别并翻译
-import katex from "./lib/katex.mjs";
+import { fillWithMath } from "./lib/mathtext.mjs";
 
 const shot = document.getElementById("shot");
 const dim = document.getElementById("dim");
@@ -174,36 +174,4 @@ function setResult(text, cls, original = "") {
   if (original) fillWithMath(origEl, original);
   origWrap.style.display = original ? "block" : "none";
   origWrap.open = false;
-}
-
-// ---------- LaTeX 公式（和划词弹窗的规则一样） ----------
-const ESCAPED_DOLLAR = "";
-const MATH_RE = /\$\$([\s\S]+?)\$\$|\$(?!\s)([^$\n]+?)(?<!\s)\$/g;
-
-function fillWithMath(el, text) {
-  const t = String(text).replace(/\\\$/g, ESCAPED_DOLLAR);
-  const plain = (s) => s.split(ESCAPED_DOLLAR).join("$");
-  MATH_RE.lastIndex = 0;
-  let last = 0;
-  let m;
-  while ((m = MATH_RE.exec(t))) {
-    const display = m[1] != null;
-    let before = t.slice(last, m.index);
-    if (display) before = before.replace(/[ \t]*\n[ \t]*$/, "");
-    if (last > 1 && t[last - 1] === "$" && t[last - 2] === "$") before = before.replace(/^[ \t]*\n/, "");
-    el.append(plain(before));
-    const tex = (display ? m[1] : m[2]).split(ESCAPED_DOLLAR).join("\\$");
-    const span = document.createElement("span");
-    span.className = display ? "math display" : "math";
-    try {
-      span.innerHTML = katex.renderToString(tex, { output: "mathml", throwOnError: false, displayMode: display });
-    } catch (_) {
-      span.textContent = m[0];
-    }
-    el.append(span);
-    last = MATH_RE.lastIndex;
-  }
-  let tail = t.slice(last);
-  if (last > 1 && t[last - 1] === "$" && t[last - 2] === "$") tail = tail.replace(/^[ \t]*\n/, "");
-  el.append(plain(tail));
 }

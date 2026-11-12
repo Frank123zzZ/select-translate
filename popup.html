@@ -32,12 +32,31 @@
     input[type=password] { width: 100%; box-sizing: border-box; padding: 6px; border: 1px solid #ccc; border-radius: 6px; }
     button { margin-top: 10px; width: 100%; padding: 7px; border: 0; border-radius: 6px; background: #d97757; color: #fff; cursor: pointer; }
     #status { color: #2a8; font-size: 12px; min-height: 18px; margin-top: 4px; }
-    button.snip { margin: -2px 0 14px; background: #f6f6f6; color: #333; }
-    button.snip:hover { background: #eee; }
-    #snipKey { color: #999; font-size: 12px; }
+
+    /* 截图翻译结果（按 Alt+T 后显示在这里） */
+    body.result-mode { width: 380px; }
+    body.result-mode #settings { display: none; }
+    #result { display: none; }
+    body.result-mode #result { display: block; }
+    #resultText { white-space: pre-wrap; word-break: break-word; font-size: 14px; line-height: 1.6; max-height: 420px; overflow: auto; }
+    #resultText.loading { color: #888; }
+    #resultText.error { color: #c0392b; }
+    #origWrap { margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,.08); color: #888; font-size: 12px; }
+    #origWrap summary { cursor: pointer; }
+    #origText { white-space: pre-wrap; word-break: break-word; max-height: 200px; overflow: auto; }
+    .result-foot { display: flex; justify-content: space-between; margin-top: 8px; padding-top: 6px; border-top: 1px solid rgba(0,0,0,.08); font-size: 12px; color: #999; }
+    .result-foot a { color: #d97757; cursor: pointer; text-decoration: none; }
+    .result-foot a:hover { text-decoration: underline; }
   </style>
+  <style id="mathCss"></style>
 </head>
 <body>
+  <div id="result" aria-live="polite">
+    <div id="resultText"></div>
+    <details id="origWrap"><summary>原文</summary><div id="origText"></div></details>
+    <div class="result-foot"><span>截图翻译</span><a id="toSettings">设置</a></div>
+  </div>
+  <div id="settings">
   <div class="header">
     <h1>划词翻译</h1>
     <label class="switch" title="开启或关闭划词翻译">
@@ -54,11 +73,11 @@
       <button type="button" data-mode="opus" role="radio">Opus 5.5<small>文学 · 细腻</small></button>
     </div>
   </div>
-  <button id="snip" class="snip">截图翻译 <span id="snipKey"></span></button>
   <label class="field" for="key">Anthropic API Key</label>
   <input id="key" type="password" placeholder="sk-ant-..." />
   <button id="save">保存 Key</button>
   <div id="status"></div>
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>

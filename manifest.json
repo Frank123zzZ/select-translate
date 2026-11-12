@@ -1,13 +1,13 @@
 {
   "manifest_version": 3,
   "name": "划词翻译",
-  "version": "2.8.0",
+  "version": "2.9.2",
   "description": "左键划词即译：外文译成简体中文，简体中文译成英文，繁体中文转成简体（Claude Sonnet 5.5 / Opus 5.5）。",
   "permissions": ["storage", "activeTab"],
   "commands": {
     "snip-translate": {
       "suggested_key": { "default": "Alt+T", "mac": "Alt+T" },
-      "description": "截图翻译：框选页面上的一块区域进行翻译（Chrome 自带的 PDF 阅读器里也能用）"
+      "description": "翻译选中（变蓝）的文字：后台截图识别，Chrome 自带的 PDF 阅读器里也能用；没有选中时打开框选窗口"
     }
   },
   "host_permissions": ["https://api.anthropic.com/*"],
