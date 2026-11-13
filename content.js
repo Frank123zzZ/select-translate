@@ -736,9 +736,26 @@
     true
   );
 
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape") hidePopup();
-  });
+  // Esc 关闭翻译弹窗。用捕获阶段，抢在网页自己的处理之前；
+  // 弹窗可能在别的小网页里（例如 Google Docs 的键盘输入在一个隐藏的 iframe 里），
+  // 所以同时通知后台，让它转告这个标签页里的所有网页都关掉弹窗
+  window.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key !== "Escape") return;
+      hidePopup();
+      if (!extensionAlive()) return;
+      try {
+        chrome.runtime.sendMessage({ type: "escape" }).catch(() => {});
+      } catch (_) {}
+    },
+    true
+  );
+  try {
+    chrome.runtime.onMessage.addListener((msg) => {
+      if (msg?.type === "hidePopup") hidePopup();
+    });
+  } catch (_) {}
 
   // 取得当前选中的文字和位置。
   // 很多网站（例如 Brightspace）把内容放在网页组件内部（Shadow DOM），

@@ -361,12 +361,25 @@ async function restoreBadge() {
   chrome.action.setBadgeBackgroundColor({ color: "#888" });
 }
 
-chrome.commands.onCommand.addListener(async (command, tab) => {
-  if (command !== "snip-translate") return;
-  chrome.action.setBadgeText({ text: "…" });
-  chrome.action.setBadgeBackgroundColor({ color: "#d97757" });
+// 连按两次快捷键：不找高亮，直接截图并打开框选窗口
+async function snipDirect(tab) {
+  if (!tab) [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) return;
+  let dataUrl;
   try {
-    await translateHighlight(tab);
+    dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+  } catch (_) {
+    await setPdfResult({ status: "error", error: "这个页面不允许截图（例如 Chrome 的设置页、扩展商店页面）。" });
+    await showResultPopup();
+    return;
+  }
+  await openSnipWindow(tab, dataUrl);
+}
+
+async function runShortcut(tab, snipOnly) {
+  try {
+    if (snipOnly) await snipDirect(tab);
+    else await translateHighlight(tab);
     await restoreBadge();
   } catch (e) {
     // 任何一步出错都显示出来，不再悄悄失败
@@ -374,6 +387,27 @@ chrome.commands.onCommand.addListener(async (command, tab) => {
     await setPdfResult({ status: "error", error: `截图翻译出错：${e?.message || e}` });
     await showResultPopup();
   }
+}
+
+// 按一次：翻译蓝色高亮；0.4 秒内再按一次：直接框选截图。
+// 所以按一次之后要稍等一下，确认没有第二次再开始。
+const DOUBLE_PRESS_MS = 400;
+let pendingPress = null;
+
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command !== "snip-translate") return;
+  chrome.action.setBadgeText({ text: "…" });
+  chrome.action.setBadgeBackgroundColor({ color: "#d97757" });
+  if (pendingPress) {
+    clearTimeout(pendingPress);
+    pendingPress = null;
+    runShortcut(tab, true);
+    return;
+  }
+  pendingPress = setTimeout(() => {
+    pendingPress = null;
+    runShortcut(tab, false);
+  }, DOUBLE_PRESS_MS);
 });
 
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -389,6 +423,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       .then((summary) => sendResponse({ ok: true, summary }))
       .catch(fail);
     return true;
+  }
+  if (msg?.type === "escape" && _sender.tab?.id != null) {
+    // 某个小网页里按了 Esc（例如 Google Docs 把键盘输入交给内部的隐藏网页）：
+    // 通知这个标签页里的所有网页，把翻译弹窗关掉
+    chrome.tabs.sendMessage(_sender.tab.id, { type: "hidePopup" }).catch(() => {});
+    return;
   }
   if (msg?.type === "translateImage") {
     // 框选窗口里用户自己框出的区域
